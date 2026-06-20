@@ -103,28 +103,39 @@ void client_handle(int csockfd, const char* status_response, int srlen) {
 	uint32_t len = readVarInt(&conn);
 	uint32_t id = readVarInt(&conn);
 
-	switch(id) {
-		//handshake
-		case 0x0: {
-			int32_t protocol = readVarInt(&conn);
-			int32_t str_len = readVarInt(&conn);
-			for (int i = 0; i < str_len; i++) readByte(&conn);
-			//port
-			readByte(&conn);
-			readByte(&conn);
-			//intent
-			int32_t intent = readVarInt(&conn);
-			
-			switch(intent) {
-				case 1: {
-					ping_sequence(csockfd, status_response, srlen, &conn);
-					break;
-				}
-			}
+	int32_t protocol = readVarInt(&conn);
+	int32_t str_len = readVarInt(&conn);
+	for (int i = 0; i < str_len; i++) readByte(&conn);
+	//port
+	readByte(&conn);
+	readByte(&conn);
+	//intent
+	int32_t intent = readVarInt(&conn);
+		
+	switch(intent) {
+		case 1: {
+			ping_sequence(csockfd, status_response, srlen, &conn);
 			break;
 		}
+		case 2: {
+			uint8_t name[16];
+			uint32_t name_len = readVarInt(&conn);
+			for (int i = 0; i < name_len; i++) name[i] = readByte(&conn);
+			uint8_t uuid[16];
+			for (int i = 0; i < 128; i++) uuid[i] = readByte(&conn);
+	
+			Wbuf body = {.len = 0};
+			for (int i = 0; i < 16; i++) writeByte(uuid[i], &body);
+			for (int i = 0; i < name_len; i++) writeByte(name[i], &body);
+			writeByte(0, &body);
+//data types
+			break;
+		}
+		default:
+			break;
 	}
 }
+
 int main() {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sockfd == -1) error("socket create");
