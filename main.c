@@ -65,6 +65,44 @@ void writeVarInt(uint32_t val, Wbuf* wbuf) {
 	writeByte(uval, wbuf);
 }
 
+void client_handle(int csockfd, const char* status_response, int srlen) {
+		Conn conn = { .fd = csockfd, .pos = 0, .len = 0};
+
+		uint32_t len = readVarInt(&conn);
+		for (int i = 0; i < len; i++) readByte(&conn); // read handshake
+
+		readVarInt(&conn); // read status request
+		readVarInt(&conn);
+
+		Wbuf body = {.len = 0};
+
+		writeVarInt(srlen, &body);
+		for (int i = 0; i < srlen; i++) {
+			writeByte(status_response[i], &body);
+		}
+
+		// form packet
+		Wbuf packet = {.len = 0};
+		writeVarInt(body.len + 1, &packet);
+		writeByte(0x00, &packet);
+		for (int i = 0; i < body.len; i++) {
+			writeByte(body.buf[i], &packet);
+		}
+		
+		write(csockfd, packet.buf, packet.len);
+
+		readVarInt(&conn);
+		readVarInt(&conn);
+		uint8_t ping[8];
+		for (int i = 0; i < 8; i++) ping[i] = readByte(&conn);
+
+		Wbuf pong = {.len = 0};
+		writeVarInt(1+8, &pong);
+		writeByte(0x01, &pong);
+		for (int i = 0; i < 8; i++) writeByte(ping[i], &pong);
+		write(csockfd, pong.buf, pong.len);
+}
+
 int main() {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sockfd == -1) error("socket create");
@@ -92,20 +130,20 @@ int main() {
 		socklen_t addrlen = sizeof(client);
 		csockfd = accept(sockfd, (struct sockaddr*)&client, &addrlen);
 		if (csockfd == -1) perror("socket accept");
-		
-		Conn conn = { .fd = csockfd, .pos = 0, .len = 0};
 
-		uint32_t len = readVarInt(&conn);
-		for (int i = 0; i < len; i++) readByte(&conn); //read handshake
-
-		readVarInt(&conn); // read status request
-		readVarInt(&conn);
-
-		Wbuf body = {.len = 0};
-
-		writeVarInt(srlen, &body);
-		for (int i = 0; i < srlen; i++) {
-			writeVarInt(status_response[i], &body);
+		switch(fork()) {
+			case -1:
+				close(csockfd);
+				break;
+			case 0:
+				close(sockfd);
+				client_handle(csockfd, status_response, srlen);
+				close(csockfd);
+				exit(0);
+				break;
+			default:
+				close(csockfd);
+				break;
 		}
 	}
 }
