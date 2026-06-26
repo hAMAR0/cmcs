@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #include "server.h"
 #include "../protocol/packets.h"
@@ -59,7 +60,7 @@ int server_loop() {
 	if (epollfd == -1) error("epoll_create1");
 	
 	ev.events = EPOLLIN;
-	ev.data.fd = sockfd;
+	ev.data.ptr = NULL;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &ev) == -1) error("epoll_ctl");
 	
 	for (;;) {
@@ -67,20 +68,43 @@ int server_loop() {
 		if (nfds == -1) error("epoll_wait");
 
 		for (int n = 0; n < nfds; n++) {
-			if (events[n].data.fd == sockfd) {
+			if (events[n].data.ptr == NULL) {
 				socklen_t addrlen = sizeof(client);
 				csockfd = accept(sockfd, (struct sockaddr*)&client, &addrlen);
 				if (csockfd == -1) perror("socket accept");
 				setnonblocking(csockfd);
 
+
+				Conn* c = calloc(1, sizeof(Conn));
+				c->fd = csockfd;
+				c->state = ST_HANDSHAKE;
+
 				ev.events = EPOLLIN;
-				ev.data.fd = csockfd;
+				ev.data.ptr = c;
 				if (epoll_ctl(epollfd, EPOLL_CTL_ADD, csockfd, &ev) == -1) error("epoll_ctl");
 			}
 
 			else {
-				int fd = events[n].data.fd;
-				// read etc
+				Conn* c = events[n].data.ptr; 
+			
+				int nread = read(c->fd, c->buf + c->len, sizeof(c->buf) - c->len);
+				if (nread > 0) {
+					c->len += nread;
+				}
+				else if (nread == 0) {
+					close(c->fd);
+					free(c);
+					continue;
+				}
+				else if (errno == EAGAIN || errno == EWOULDBLOCK) { // -1 with EAGAIN || EWOULDBLOCK means socket is empty rn, no need to close and free
+				}
+				else {
+					close(c->fd);
+					free(c);
+					continue;
+				}
+
+				// 
 			}
 		}
 	}

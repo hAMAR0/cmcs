@@ -1,11 +1,18 @@
 #include <stdio.h>
 #include <stdint.h>
 
+typedef enum {
+	ST_HANDSHAKE,
+	ST_STATUS,
+	ST_LOGIN
+} ConnState;
+
 typedef struct {
 	uint8_t buf[4096];
 	size_t pos;
 	size_t len;
 	int fd;
+	ConnState state;
 } Conn;
 
 typedef struct {
@@ -21,3 +28,5 @@ void writeByte(uint8_t byte, Wbuf* wbuf);
 int readVarInt(Conn *conn);
 
 void writeVarInt(uint32_t val, Wbuf* wbuf);
+
+int packetReady(Conn* conn);
