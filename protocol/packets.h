@@ -6,7 +6,9 @@
 typedef enum {
 	ST_HANDSHAKE,
 	ST_STATUS,
-	ST_LOGIN
+	ST_LOGIN,
+	ST_CONFIGURATION,
+	ST_PLAY
 } ConnState;
 
 typedef struct {

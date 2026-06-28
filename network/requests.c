@@ -15,6 +15,12 @@ int dispatch(Conn* c, int id) {
 			if (id == 0x00) return status_req_handle(c);
 			else if (id == 0x01) return ping_req_handle(c);
 			break;
+		case ST_LOGIN:
+			if (id == 0x00) return login_handle(c);
+			if (id == 0x03) {
+				c->state = ST_CONFIGURATION;
+			}
+			break;
 		default: return 0;
 	}
 	return 0;
@@ -26,10 +32,7 @@ int handshake_handle(Conn* c) {
 	// server address
 	int salen = readVarInt(c);
 	if (salen > 256 || salen < 0) return -1;
-	char serverAddress[256];
-	for (int i = 0; i < salen; i++) {
-		serverAddress[i] = readByte(c);
-	}
+	for (int i = 0; i < salen; i++) readByte(c);
 
 	//server port
 	readByte(c);
@@ -58,12 +61,12 @@ int status_req_handle(Conn* c) {
 
 	Wbuf body = {0}, packet = {0};
 	writeVarInt(srlen, &body);
-	for (int i = 0; i < srlen; i++) {
+	for (size_t i = 0; i < srlen; i++) {
 		writeByte(status_response[i], &body);
 	}
 	writeVarInt(body.len+1, &packet);
 	writeVarInt(0x0, &packet);
-	for (int i = 0; i < body.len; i++) {
+	for (size_t i = 0; i < body.len; i++) {
 		writeByte(body.buf[i], &packet);
 	}
 	return write(c->fd, packet.buf, packet.len);
@@ -78,8 +81,29 @@ int ping_req_handle(Conn* c) {
 
 	writeVarInt(sizeof(timestamp) + 1, &packet);
 	writeVarInt(0x01, &packet);
-	for (int i = 0; i < sizeof(timestamp); i++) {
+	for (size_t i = 0; i < sizeof(timestamp); i++) {
 		writeByte(timestamp[i], &packet);
 	}
+	return write(c->fd, packet.buf, packet.len);
+}
+
+int login_handle(Conn* c) {
+	uint16_t nameLen;
+	char name[16];
+	nameLen = readVarInt(c);
+	if (nameLen > 16) return -1;
+	for (size_t i = 0; i<nameLen; i++) name[i] = readByte(c);
+	
+	uint8_t uuid[16];
+	for (size_t i = 0; i<sizeof(uuid); i++) uuid[i] = readByte(c);
+
+	Wbuf body = {0}, packet = {0};
+	for (size_t i = 0; i < sizeof(uuid); i++) writeByte(uuid[i], &body);
+	writeVarInt(nameLen, &body);
+	for (size_t i = 0; i < nameLen; i++) writeByte(name[i], &body);
+
+	writeVarInt(body.len + 1, &packet);
+	writeVarInt(0x02, &packet);
+	for (size_t i = 0; i < body.len; i++) writeByte(body.buf[i], &packet);
 	return write(c->fd, packet.buf, packet.len);
 }
