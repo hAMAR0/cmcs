@@ -10,6 +10,7 @@
 #include <errno.h>
 
 #include "server.h"
+#include "requests.h"
 #include "../protocol/packets.h"
 
 #define PORT 25565
@@ -47,13 +48,6 @@ int server_loop() {
 	
 	if (listen(sockfd, 777) == -1) error("socket listen");
 
-	const char* status_response = "{\"version\":{\"name\":\"26.2\",\"protocol\":776}," 
-		"\"players\":{\"max\":20,\"online\":5},"
-		"\"description\":{\"text\":\"C minecraft server\"}}";
-
-	size_t srlen = strlen(status_response);
-
-
 	struct epoll_event ev, events[MAX_EVENTS];
 	
 	epollfd = epoll_create1(0);
@@ -68,22 +62,31 @@ int server_loop() {
 		if (nfds == -1) error("epoll_wait");
 
 		for (int n = 0; n < nfds; n++) {
+			// server socket
 			if (events[n].data.ptr == NULL) {
 				socklen_t addrlen = sizeof(client);
 				csockfd = accept(sockfd, (struct sockaddr*)&client, &addrlen);
-				if (csockfd == -1) perror("socket accept");
+				if (csockfd == -1) {
+					perror("socket accept");
+					continue;
+				}
 				setnonblocking(csockfd);
 
 
-				Conn* c = calloc(1, sizeof(Conn));
+				Conn* c = calloc(1, sizeof(Conn)); // TODO: check for NULL
 				c->fd = csockfd;
 				c->state = ST_HANDSHAKE;
 
 				ev.events = EPOLLIN;
 				ev.data.ptr = c;
-				if (epoll_ctl(epollfd, EPOLL_CTL_ADD, csockfd, &ev) == -1) error("epoll_ctl");
+				if (epoll_ctl(epollfd, EPOLL_CTL_ADD, csockfd, &ev) == -1) {
+					perror("epoll_ctl");
+					close(c->fd);
+					free(c);
+				}
 			}
-
+			
+			//client socket
 			else {
 				Conn* c = events[n].data.ptr; 
 			
@@ -103,11 +106,36 @@ int server_loop() {
 					free(c);
 					continue;
 				}
+				
+				
+				int total = packetReady(c);
+				while (total > 0) {
+					int end = c->pos + total; //calculate where current packet ends
+					readVarInt(c); // packet length
+					int packetId = readVarInt(c);
+					if (dispatch(c, packetId) == -1) {
+						close(c->fd);
+						free(c);
+						continue;
+					}
+					c->pos = end; // move con pos to the end of the current packet
+					total = packetReady(c);
+				}
 
-				// 
+				if (total == -1) {
+					/* TODO: check if already closed in dispatch
+					close(c->fd);
+					free(c);
+					continue;
+					*/
+				}
+
+				memmove(c->buf, c->buf + c->pos, c->len - c->pos); // move tail to the position of parsed packet
+				c->len -= c->pos;
+				c->pos = 0;
 			}
 		}
 	}
-
 	return 0;
 }
+
